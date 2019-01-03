@@ -340,42 +340,46 @@ func (c *controller) generateConfig() error {
 	}
 
 	dnsResolvers := make(map[string]*api.DNSResolver)
-	if c.Ingress.Spec.Backend != nil {
+	if c.Ingress.Spec.Backend != nil { // default backend
 		bk, err := c.serviceEndpoints(dnsResolvers, userLists, c.Ingress.Spec.Backend.ServiceName, c.Ingress.Spec.Backend.ServicePort, c.Ingress.Spec.Backend.HostNames)
 		if err != nil {
 			c.recorder.Eventf(
 				c.Ingress.ObjectReference(),
 				core.EventTypeWarning,
 				eventer.EventReasonBackendInvalid,
-				"spec.backend skipped, reason: %s", err,
+				"can't resolve spec.backend, reason: %s", err,
 			)
 		} else if len(bk.Endpoints) == 0 {
 			c.recorder.Eventf(
 				c.Ingress.ObjectReference(),
 				core.EventTypeWarning,
 				eventer.EventReasonBackendInvalid,
-				"spec.backend skipped, reason: %s", "endpoint not found",
+				"can't resolve spec.backend, reason: %s", "endpoint not found",
 			)
+		}
+
+		if bk == nil { // to avoid nil pointer, backend might nil when error found
+			bk = &hpi.Backend{}
+		}
+
+		si.DefaultBackend = &hpi.Backend{
+			BasicAuth:        bk.BasicAuth,
+			Endpoints:        bk.Endpoints,
+			BackendRules:     c.Ingress.Spec.Backend.BackendRules,
+			RewriteRules:     c.Ingress.Spec.Backend.RewriteRules,
+			HeaderRules:      c.Ingress.Spec.Backend.HeaderRules,
+			Sticky:           bk.Sticky,
+			StickyCookieName: bk.StickyCookieName,
+			StickyCookieHash: bk.StickyCookieHash,
+		}
+		if c.Ingress.Spec.Backend.Name != "" {
+			si.DefaultBackend.Name = c.Ingress.Spec.Backend.Name
 		} else {
-			si.DefaultBackend = &hpi.Backend{
-				BasicAuth:        bk.BasicAuth,
-				Endpoints:        bk.Endpoints,
-				BackendRules:     c.Ingress.Spec.Backend.BackendRules,
-				RewriteRules:     c.Ingress.Spec.Backend.RewriteRules,
-				HeaderRules:      c.Ingress.Spec.Backend.HeaderRules,
-				Sticky:           bk.Sticky,
-				StickyCookieName: bk.StickyCookieName,
-				StickyCookieHash: bk.StickyCookieHash,
-			}
-			if c.Ingress.Spec.Backend.Name != "" {
-				si.DefaultBackend.Name = c.Ingress.Spec.Backend.Name
-			} else {
-				si.DefaultBackend.Name = "default-backend" // TODO: Use constant
-				si.DefaultBackend.NameGenerated = true
-			}
-			if globalBasic != nil {
-				si.DefaultBackend.BasicAuth = globalBasic
-			}
+			si.DefaultBackend.Name = "default-backend" // TODO: Use constant
+			si.DefaultBackend.NameGenerated = true
+		}
+		if globalBasic != nil {
+			si.DefaultBackend.BasicAuth = globalBasic
 		}
 	}
 
@@ -450,37 +454,41 @@ func (c *controller) generateConfig() error {
 						c.Ingress.ObjectReference(),
 						core.EventTypeWarning,
 						eventer.EventReasonBackendInvalid,
-						"spec.rules[%d].http.paths[%d] skipped, reason: %s", ri, pi, err,
+						"can't resolve backend for spec.rules[%d].http.paths[%d], reason: %s", ri, pi, err,
 					)
 				} else if len(bk.Endpoints) == 0 {
 					c.recorder.Eventf(
 						c.Ingress.ObjectReference(),
 						core.EventTypeWarning,
 						eventer.EventReasonBackendInvalid,
-						"spec.rules[%d].http.paths[%d] skipped, reason: %s", ri, pi, "endpoint not found",
+						"can't resolve backend for spec.rules[%d].http.paths[%d], reason: %s", ri, pi, "endpoint not found",
 					)
-				} else {
-					httpPath := &hpi.HTTPPath{
-						Path: path.Path,
-						Backend: &hpi.Backend{
-							BasicAuth:        bk.BasicAuth,
-							Endpoints:        bk.Endpoints,
-							BackendRules:     path.Backend.BackendRules,
-							RewriteRules:     c.rewriteTarget(path.Path, path.Backend.RewriteRules),
-							HeaderRules:      path.Backend.HeaderRules,
-							Sticky:           bk.Sticky,
-							StickyCookieName: bk.StickyCookieName,
-							StickyCookieHash: bk.StickyCookieHash,
-						},
-					}
-					if path.Backend.IngressBackend.Name != "" {
-						httpPath.Backend.Name = path.Backend.IngressBackend.Name
-					} else {
-						httpPath.Backend.Name = getBackendName(c.Ingress, path.Backend.IngressBackend)
-						httpPath.Backend.NameGenerated = true
-					}
-					httpPaths = append(httpPaths, httpPath)
 				}
+
+				if bk == nil { // to avoid nil pointer, backend might nil when error found
+					bk = &hpi.Backend{}
+				}
+
+				httpPath := &hpi.HTTPPath{
+					Path: path.Path,
+					Backend: &hpi.Backend{
+						BasicAuth:        bk.BasicAuth,
+						Endpoints:        bk.Endpoints,
+						BackendRules:     path.Backend.BackendRules,
+						RewriteRules:     c.rewriteTarget(path.Path, path.Backend.RewriteRules),
+						HeaderRules:      path.Backend.HeaderRules,
+						Sticky:           bk.Sticky,
+						StickyCookieName: bk.StickyCookieName,
+						StickyCookieHash: bk.StickyCookieHash,
+					},
+				}
+				if path.Backend.IngressBackend.Name != "" {
+					httpPath.Backend.Name = path.Backend.IngressBackend.Name
+				} else {
+					httpPath.Backend.Name = getBackendName(c.Ingress, path.Backend.IngressBackend)
+					httpPath.Backend.NameGenerated = true
+				}
+				httpPaths = append(httpPaths, httpPath)
 			}
 			info.Hosts[rule.GetHost()] = httpPaths
 		} else if rule.TCP != nil {
@@ -499,40 +507,44 @@ func (c *controller) generateConfig() error {
 					c.Ingress.ObjectReference(),
 					core.EventTypeWarning,
 					eventer.EventReasonBackendInvalid,
-					"spec.rules[%d].tcp skipped, reason: %s", ri, err,
+					"can't resolve backend for spec.rules[%d].tcp, reason: %s", ri, err,
 				)
 			} else if len(bk.Endpoints) == 0 {
 				c.recorder.Eventf(
 					c.Ingress.ObjectReference(),
 					core.EventTypeWarning,
 					eventer.EventReasonBackendInvalid,
-					"spec.rules[%d].tcp skipped, reason: %s", ri, "endpoint not found",
+					"can't resolve backend for spec.rules[%d].tcp, reason: %s", ri, "endpoint not found",
 				)
+			}
+
+			if bk == nil { // to avoid nil pointer, backend might nil when error found
+				bk = &hpi.Backend{}
+			}
+
+			tcpHost := &hpi.TCPHost{
+				Host: rule.GetHost(),
+				Backend: &hpi.Backend{
+					BackendRules:     rule.TCP.Backend.BackendRules,
+					Endpoints:        bk.Endpoints,
+					Sticky:           bk.Sticky,
+					StickyCookieName: bk.StickyCookieName,
+					StickyCookieHash: bk.StickyCookieHash,
+				},
+			}
+
+			if rule.TCP.Backend.Name != "" {
+				tcpHost.Backend.Name = rule.TCP.Backend.Name
 			} else {
-				tcpHost := &hpi.TCPHost{
-					Host: rule.GetHost(),
-					Backend: &hpi.Backend{
-						BackendRules:     rule.TCP.Backend.BackendRules,
-						Endpoints:        bk.Endpoints,
-						Sticky:           bk.Sticky,
-						StickyCookieName: bk.StickyCookieName,
-						StickyCookieHash: bk.StickyCookieHash,
-					},
-				}
+				tcpHost.Backend.Name = getBackendName(c.Ingress, rule.TCP.Backend)
+				tcpHost.Backend.NameGenerated = true
+			}
 
-				if rule.TCP.Backend.Name != "" {
-					tcpHost.Backend.Name = rule.TCP.Backend.Name
-				} else {
-					tcpHost.Backend.Name = getBackendName(c.Ingress, rule.TCP.Backend)
-					tcpHost.Backend.NameGenerated = true
-				}
+			info.Hosts = append(info.Hosts, tcpHost)
+			info.ALPNOptions = rule.ParseALPNOptions()
 
-				info.Hosts = append(info.Hosts, tcpHost)
-				info.ALPNOptions = rule.ParseALPNOptions()
-
-				if c.Ingress.UseTLSForRule(rule) {
-					info.OffloadSSL = true
-				}
+			if c.Ingress.UseTLSForRule(rule) {
+				info.OffloadSSL = true
 			}
 		}
 	}
