@@ -248,11 +248,13 @@ type hostBinder struct {
 type httpInfo struct {
 	OffloadSSL  bool
 	ALPNOptions string
+	Proto       string
 	Hosts       map[string][]*hpi.HTTPPath
 }
 type tcpInfo struct {
 	OffloadSSL  bool
 	ALPNOptions string
+	Proto       string
 	Hosts       []*hpi.TCPHost
 }
 
@@ -366,6 +368,8 @@ func (c *controller) generateConfig() error {
 				Sticky:           bk.Sticky,
 				StickyCookieName: bk.StickyCookieName,
 				StickyCookieHash: bk.StickyCookieHash,
+				ALPNOptions:      c.Ingress.Spec.Backend.ParseALPNOptions(),
+				Proto:            c.Ingress.Spec.Backend.Proto,
 			}
 			if c.Ingress.Spec.Backend.Name != "" {
 				si.DefaultBackend.Name = c.Ingress.Spec.Backend.Name
@@ -441,6 +445,7 @@ func (c *controller) generateConfig() error {
 			}
 			info.OffloadSSL = offloadSSL
 			info.ALPNOptions = rule.ParseALPNOptions()
+			info.Proto = rule.HTTP.Proto
 
 			httpPaths := info.Hosts[rule.GetHost()]
 			for pi, path := range rule.HTTP.Paths {
@@ -471,6 +476,8 @@ func (c *controller) generateConfig() error {
 							Sticky:           bk.Sticky,
 							StickyCookieName: bk.StickyCookieName,
 							StickyCookieHash: bk.StickyCookieHash,
+							ALPNOptions:      path.Backend.ParseALPNOptions(),
+							Proto:            path.Backend.Proto,
 						},
 					}
 					if path.Backend.IngressBackend.Name != "" {
@@ -517,6 +524,8 @@ func (c *controller) generateConfig() error {
 						Sticky:           bk.Sticky,
 						StickyCookieName: bk.StickyCookieName,
 						StickyCookieHash: bk.StickyCookieHash,
+						ALPNOptions:      rule.TCP.Backend.ParseALPNOptions(),
+						Proto:            rule.TCP.Backend.Proto,
 					},
 				}
 
@@ -529,6 +538,7 @@ func (c *controller) generateConfig() error {
 
 				info.Hosts = append(info.Hosts, tcpHost)
 				info.ALPNOptions = rule.ParseALPNOptions()
+				info.Proto = rule.TCP.Proto
 
 				if c.Ingress.UseTLSForRule(rule) {
 					info.OffloadSSL = true
@@ -604,6 +614,7 @@ func (c *controller) generateConfig() error {
 			FrontendRules: fr.Rules,
 			OffloadSSL:    info.OffloadSSL,
 			ALPNOptions:   info.ALPNOptions,
+			Proto:         info.Proto,
 			Hosts:         make([]*hpi.HTTPHost, 0),
 		}
 		for host, paths := range info.Hosts {
@@ -676,6 +687,7 @@ func (c *controller) generateConfig() error {
 			Port:          strconv.Itoa(binder.Port),
 			FrontendRules: fr.Rules,
 			ALPNOptions:   info.ALPNOptions,
+			Proto:         info.Proto,
 			OffloadSSL:    info.OffloadSSL,
 			Hosts:         info.Hosts,
 		}
